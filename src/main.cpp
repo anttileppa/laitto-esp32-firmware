@@ -8,6 +8,26 @@
 #include <ETH.h>
 #include "secrets.h"
 
+/**
+ * Pin mapping for relays
+ */
+static const int relayToPinMapping[16] = {
+  00, 00, 00, 00, // Relay 1 to 4
+  00, 00, 00, 00, // Relay 5 to 8
+  00, 00, 00, 00, // Relay 9 to 12
+  00, 00, 10, 11  // Relay 13 to 16
+};
+
+/**
+ * Relay states
+ */
+static bool relayOn[16] = {
+  false, false, false, false, // Relay 1 to 4
+  false, false, false, false, // Relay 5 to 8
+  false, false, false, false, // Relay 9 to 12
+  false, false, false, false  // Relay 13 to 16
+};
+
 // Constants
 #define NETWORK_CONNECTION_TIMEOUT_MS 15000
 #define MQTT_CONNECT_TIMEOUT 10000
@@ -47,6 +67,65 @@ void connectWifi() {
 }
 
 /**
+ * Sets relay active or inactive
+ * 
+ * @param relayIndex index of the relay
+ * @param active true if relay should be active, false otherwise
+ */
+void setRelayActive(int relayIndex, bool active) {
+  if (relayOn[relayIndex] == active) {
+    Serial.println("Relay " + String(relayIndex) + " is already " + String(active ? "active" : "deactive"));
+    return;
+  }
+    
+  int pin = relayToPinMapping[relayIndex];
+  if (pin == 0) {
+    Serial.println("Relay index " + String(relayIndex) + " is not mapped to any pin");
+    return;
+  } else {
+    Serial.println("Setting relay " + String(relayIndex) + " to " + String(active ? "active" : "deactive"));
+    digitalWrite(pin, active ? LOW : HIGH);
+    relayOn[relayIndex] = active;
+  }
+};
+
+/**
+ * MQTT message received callback
+ * 
+ * @param topic topic of the message
+ * @param payload payload of the message
+ */
+void messageReceived(String &topic, String &payload) {
+  String relayTopic = "devices/" + deviceId + "/relay/";
+
+  if (topic.startsWith(relayTopic)) {
+    int relayIndex = topic.substring(relayTopic.length()).toInt();
+
+    StaticJsonDocument<200> doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    
+    if (error) {
+      Serial.println("Failed to parse JSON");
+      return;
+    }
+
+    setRelayActive(relayIndex, doc["active"]);
+  }
+}
+
+/**
+ * Publishes online message to mqtt broker
+ */
+void publishOnlineMqttMessage() {
+  StaticJsonDocument<200> doc;
+  doc["status"] = "online";
+  doc["version"] = VERSION_NAME;
+  char jsonBuffer[512];
+  serializeJson(doc, jsonBuffer);
+  client.publish("devices/" + deviceId + "/status", jsonBuffer);
+}
+
+/**
  * Connect to MQTT 
 */
 void connectToMQTT() {
@@ -72,6 +151,11 @@ void connectToMQTT() {
     Serial.println(client.lastError());
     Serial.print(".");
   }
+
+  String relay_channel = "devices/" + deviceId + "/relay/#";
+  client.subscribe(relay_channel.c_str());
+  client.onMessage(messageReceived);
+  publishOnlineMqttMessage();
 
   Serial.println("MQTT connected!");
 }
@@ -104,13 +188,26 @@ void sendTemperatureData(DeviceAddress deviceAddress) {
   doc["temperature"] = tempC;
   char jsonBuffer[512];
   serializeJson(doc, jsonBuffer);
+
+  std::string channel = "devices/" + arrayToHexString(deviceAddress, 8) + "/status/temperature";
+  client.publish(channel.c_str(), jsonBuffer);
+
+  Serial.print(channel.c_str());
+  Serial.print(": ");
   Serial.println(jsonBuffer);
-
-  std::ostringstream channel;
-  channel << "devices/" << arrayToHexString(deviceAddress, 8) << "/status/temperature";
-
-  client.publish(channel.str().c_str(), jsonBuffer);
 };
+
+/**
+ * Initialize relays by setting pin mode to output 
+ */
+void initialiseRelays() {
+  for (int i = 0; i < 16; i++) {
+    int pin = relayToPinMapping[i];
+    if (pin != 0) {
+      pinMode(pin, OUTPUT);
+    }
+  }
+}
 
 /**
  * Setup function
@@ -119,16 +216,24 @@ void setup() {
   // Init serial
   Serial.begin(9600);
 
+  // Initialize relays
+  initialiseRelays();
+  
   // Init temperature sensors
   sensors.begin();
   temperatureSensorCount = sensors.getDeviceCount();
 
   // Init network
   deviceId = WiFi.macAddress();
+
+  // Connect to wifi
   connectWifi();
 
   // Init MQTT
   connectToMQTT();
+
+  Serial.println("Setup done!");
+  Serial.println("Device id: " + deviceId);
 }
 
 /**
