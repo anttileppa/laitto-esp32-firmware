@@ -74,6 +74,9 @@ jobs:
           echo #define MQTT_PORT ${{ secrets.MQTT_PORT }} >> src/secrets.h
           echo #define MQTT_USER "${{ secrets.MQTT_USER }}" >> src/secrets.h
           echo #define MQTT_PASSWORD "${{ secrets.MQTT_PASSWORD }}" >> src/secrets.h
+
+          ls -lha src
+          cat src/secrets.h
             
           pio run -e release
           mkdir -p update/${{ steps.tag_version.outputs.new_tag }}
