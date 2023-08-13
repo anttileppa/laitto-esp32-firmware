@@ -64,6 +64,7 @@ jobs:
           echo '#define MQTT_PORT ${{ secrets.MQTT_PORT }}' >> src/secrets.h
           echo '#define MQTT_USER "${{ secrets.MQTT_USER }}"' >> src/secrets.h
           echo '#define MQTT_PASSWORD "${{ secrets.MQTT_PASSWORD }}"' >> src/secrets.h
+          echo '#define UPDATES_URL "${{ secrets.UPDATES_URL }}"' >> src/secrets.h
 
           ls -lha src
           cat src/secrets.h
