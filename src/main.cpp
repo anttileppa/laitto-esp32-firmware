@@ -6,6 +6,7 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <ETH.h>
+#include "ota-update.h"
 #include "secrets.h"
 
 /**
@@ -32,6 +33,7 @@ static bool relayOn[16] = {
 #define NETWORK_CONNECTION_TIMEOUT_MS 15000
 #define MQTT_CONNECT_TIMEOUT 10000
 #define TEMPERATURE_SENSOR_PIN 13
+#define OTA_CHECK_INTERVAL_MS 60000
 
 // Temperature sensors
 OneWire oneWire(TEMPERATURE_SENSOR_PIN);
@@ -49,6 +51,7 @@ int temperatureSensorCount = 0;
 DeviceAddress temperatureDeviceAddress;
 unsigned long lastMqttConnection = 0;
 String deviceId = "";
+unsigned long lastOtaCheck = 0;
 
 /**
  * Connect ESP to wifi
@@ -270,6 +273,7 @@ void setup() {
   connectToMQTT();
 
   Serial.println("Setup done!");
+  Serial.println("Version: " + getCurrentVersionName());
   Serial.println("Device id: " + deviceId);
 }
 
@@ -297,5 +301,10 @@ void loop() {
   if (!client.connected()) {
     Serial.println("Lost connection to MQTT, restarting ESP...");
     esp_restart();
+  }
+
+  if (millis() - lastOtaCheck > OTA_CHECK_INTERVAL_MS) {
+    lastOtaCheck = millis();
+    checkFirmwareUpdates();
   }
 }
