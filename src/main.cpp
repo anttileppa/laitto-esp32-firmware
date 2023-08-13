@@ -72,8 +72,8 @@ void connectWifi() {
  * @param relayIndex index of the relay
  * @param active true if relay should be active, false otherwise
  */
-void setRelayActive(int relayIndex, bool active) {
-  if (relayOn[relayIndex] == active) {
+void setRelayActive(int relayIndex, bool active, bool force = false) {
+  if (!force && relayOn[relayIndex] == active) {
     Serial.println("Relay " + String(relayIndex) + " is already " + String(active ? "active" : "deactive"));
     return;
   }
@@ -205,6 +205,7 @@ void initialiseRelays() {
     int pin = relayToPinMapping[i];
     if (pin != 0) {
       pinMode(pin, OUTPUT);
+      setRelayActive(i, false, true);
     }
   }
 }
