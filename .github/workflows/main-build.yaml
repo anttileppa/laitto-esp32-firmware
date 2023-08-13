@@ -57,14 +57,13 @@ jobs:
 
       - name: Build PlatformIO Project
         run: |
-          touch src/secrets.h
-          echo #define WIFI_SSID "${{ secrets.WIFI_SSID }}" >> src/secrets.h
-          echo #define WIFI_PASSWORD "${{ secrets.WIFI_PASSWORD }}" >> src/secrets.h
-          echo #define MQTT_TOPIC "${{ secrets.MQTT_TOPIC }}" >> src/secrets.h
-          echo #define MQTT_SERVER "${{ secrets.MQTT_SERVER }}" >> src/secrets.h
-          echo #define MQTT_PORT ${{ secrets.MQTT_PORT }} >> src/secrets.h
-          echo #define MQTT_USER "${{ secrets.MQTT_USER }}" >> src/secrets.h
-          echo #define MQTT_PASSWORD "${{ secrets.MQTT_PASSWORD }}" >> src/secrets.h
+          echo '#define WIFI_SSID "${{ secrets.WIFI_SSID }}"' > src/secrets.h
+          echo '#define WIFI_PASSWORD "${{ secrets.WIFI_PASSWORD }}"' >> src/secrets.h
+          echo '#define MQTT_TOPIC "${{ secrets.MQTT_TOPIC }}"' >> src/secrets.h
+          echo '#define MQTT_SERVER "${{ secrets.MQTT_SERVER }}"' >> src/secrets.h
+          echo '#define MQTT_PORT ${{ secrets.MQTT_PORT }}' >> src/secrets.h
+          echo '#define MQTT_USER "${{ secrets.MQTT_USER }}"' >> src/secrets.h
+          echo '#define MQTT_PASSWORD "${{ secrets.MQTT_PASSWORD }}"' >> src/secrets.h
 
           ls -lha src
           cat src/secrets.h
