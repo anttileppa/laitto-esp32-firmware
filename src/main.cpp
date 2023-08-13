@@ -31,6 +31,7 @@ static bool relayOn[16] = {
 // Constants
 #define NETWORK_CONNECTION_TIMEOUT_MS 15000
 #define MQTT_CONNECT_TIMEOUT 10000
+#define TEMPERATURE_SENSOR_PIN 13
 
 // Temperature sensors
 OneWire oneWire(TEMPERATURE_SENSOR_PIN);
