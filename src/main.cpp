@@ -96,20 +96,26 @@ void setRelayActive(int relayIndex, bool active, bool force = false) {
  * @param payload payload of the message
  */
 void messageReceived(String &topic, String &payload) {
-  String relayTopic = "devices/" + deviceId + "/relay/";
-
-  if (topic.startsWith(relayTopic)) {
-    int relayIndex = topic.substring(relayTopic.length()).toInt();
-
-    StaticJsonDocument<200> doc;
-    DeserializationError error = deserializeJson(doc, payload);
+  if (topic.startsWith("devices/") && topic.endsWith("/changeStatus")) {
+    // It's a device status change message
+    String deviceId = topic.substring(topic.indexOf('/') + 1, topic.lastIndexOf('/')); 
+    int relayIndex = deviceId.indexOf("-relay-");
     
-    if (error) {
-      Serial.println("Failed to parse JSON");
-      return;
-    }
+    if (relayIndex > -1) {
+      // ... for a relay
+      String relayIndexString = deviceId.substring(relayIndex + 7);
+      int relayIndex = relayIndexString.toInt();
 
-    setRelayActive(relayIndex, doc["active"]);
+      StaticJsonDocument<200> doc;
+      DeserializationError error = deserializeJson(doc, payload);
+      
+      if (error) {
+        Serial.println("Failed to parse JSON");
+        return;
+      }
+
+      setRelayActive(relayIndex, doc["status"] > 0);
+    }
   }
 }
 
@@ -123,6 +129,33 @@ void publishOnlineMqttMessage() {
   char jsonBuffer[512];
   serializeJson(doc, jsonBuffer);
   client.publish("devices/" + deviceId + "/status", jsonBuffer);
+}
+
+/**
+ * Returns short device id (without colons), e.g. 1234567890
+ * 
+ * @return short device id
+ */
+String getShortDeviceId() {
+  String output = "";
+
+  for (int i = 0; i < deviceId.length(); i++) {
+    if (deviceId[i] != ':') {
+      output += deviceId[i];
+    }
+  }
+
+  return output;
+}
+
+/**
+ * Returns relay id. Id is in format <device_id>-relay-<index> (e.g. 1234567890-relay-1).
+ * 
+ * @param index index of the relay
+ * @return relay id 
+ */
+String getRelayId(int index) {
+  return getShortDeviceId() + "-relay-" + String(index);
 }
 
 /**
@@ -152,8 +185,10 @@ void connectToMQTT() {
     Serial.print(".");
   }
 
-  String relay_channel = "devices/" + deviceId + "/relay/#";
-  client.subscribe(relay_channel.c_str());
+  for (int i = 0; i < 16; i++) {
+    client.subscribe("devices/" + getRelayId(i) + "/changeStatus");
+  };
+
   client.onMessage(messageReceived);
   publishOnlineMqttMessage();
 
