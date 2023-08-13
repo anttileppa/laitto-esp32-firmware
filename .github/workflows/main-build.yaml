@@ -1,4 +1,4 @@
-name: Build and release firmware (master)
+name: Build and release firmware (main)
 on:
   push:
     branches:
