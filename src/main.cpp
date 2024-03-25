@@ -52,6 +52,10 @@ DeviceAddress temperatureDeviceAddress;
 unsigned long lastMqttConnection = 0;
 String deviceId = "";
 unsigned long lastOtaCheck = 0;
+unsigned long ssrState = 0;
+unsigned long ssrLastPulse = 0;
+unsigned long ssrInterval = 0;
+bool ssrActive = false;
 
 /**
  * Connect ESP to wifi
@@ -81,7 +85,7 @@ void setRelayActive(int relayIndex, bool active, bool force = false) {
     Serial.println("Relay " + String(relayIndex) + " is already " + String(active ? "active" : "deactive"));
     return;
   }
-    
+  
   int pin = relayToPinMapping[relayIndex];
   if (pin == 0) {
     Serial.println("Relay index " + String(relayIndex) + " is not mapped to any pin");
@@ -94,6 +98,24 @@ void setRelayActive(int relayIndex, bool active, bool force = false) {
 };
 
 /**
+ * Parses change status message status
+ * 
+ * @param payload payload of the message
+ * @return status
+ */
+int parseChangeStatusMessageStatus(String &payload) {
+  StaticJsonDocument<200> doc;
+  DeserializationError error = deserializeJson(doc, payload);
+  
+  if (error) {
+    Serial.println("Failed to parse JSON");
+    return;
+  }
+
+  return doc["status"]; 
+}
+
+/**
  * MQTT message received callback
  * 
  * @param topic topic of the message
@@ -102,23 +124,25 @@ void setRelayActive(int relayIndex, bool active, bool force = false) {
 void messageReceived(String &topic, String &payload) {
   if (topic.startsWith("devices/") && topic.endsWith("/changeStatus")) {
     // It's a device status change message
+    
     String deviceId = topic.substring(topic.indexOf('/') + 1, topic.lastIndexOf('/')); 
+    int status = parseChangeStatusMessageStatus(payload);
     int relayIndex = deviceId.indexOf("-relay-");
     
     if (relayIndex > -1) {
       // ... for a relay
+
       String relayIndexString = deviceId.substring(relayIndex + 7);
       int relayIndex = relayIndexString.toInt();
-
-      StaticJsonDocument<200> doc;
-      DeserializationError error = deserializeJson(doc, payload);
-      
-      if (error) {
-        Serial.println("Failed to parse JSON");
-        return;
+      if (status > -1) {
+        setRelayActive(relayIndex, status > 0);
       }
+    } else if (deviceId.endsWith("-ssr")) {
+      // ... for SSR
 
-      setRelayActive(relayIndex, doc["status"] > 0);
+      if (status > -1) {
+        updateSsrState(status);
+      }
     }
   }
 }
@@ -250,6 +274,13 @@ void initialiseRelays() {
 }
 
 /**
+ * Initialize SSR by setting pin mode to output
+ */
+void initSsr() {
+  pinMode(SSR_PIN, OUTPUT);
+}
+
+/**
  * Setup function
  */
 void setup() {
@@ -258,7 +289,10 @@ void setup() {
 
   // Initialize relays
   initialiseRelays();
-  
+
+  // Init SSR
+  initSsr();
+
   // Init temperature sensors
   sensors.begin();
   temperatureSensorCount = sensors.getDeviceCount();
@@ -278,6 +312,35 @@ void setup() {
 }
 
 /**
+ * Calculate SSR interval based on SSR state
+ * 
+ * @return SSR interval in milliseconds
+ */
+int calculateSsrInterval() {
+  return 500 * (100 - ssrState) / 100;
+}
+
+/**
+ * Update SSR state and calculate new interval
+ * 
+ * @param newState new state of the SSR
+ */
+void updateSsrState(int newState) {
+  ssrState = newState;
+  ssrInterval = calculateSsrInterval();
+}
+
+/**
+ * Set SSR active or inactive
+ * 
+ * @param active true if SSR should be active, false otherwise
+ */
+void setSsrActive(bool active) {
+  ssrActive = active;
+  digitalWrite(SSR_PIN, ssrActive ? HIGH : LOW);
+}
+
+/**
  * Main loop
  */
 void loop() {
@@ -290,8 +353,6 @@ void loop() {
   }
 
   client.loop();
-
-  delay(1000);
 
   if (WiFi.status() != WL_CONNECTED){
     Serial.println("Lost connection to Wi-Fi, restarting ESP..."); 
@@ -307,4 +368,16 @@ void loop() {
     lastOtaCheck = millis();
     checkFirmwareUpdates();
   }
+
+  if (ssrState == 0 && ssrActive) {
+    setSsrActive(false);
+  } else if (ssrState == 100 && !ssrActive) {
+    setSsrActive(true);
+  } else {
+    if (millis() - ssrLastPulse > ssrInterval) {
+      ssrLastPulse = millis();
+      setSsrActive(!ssrActive);
+    }
+  }
+
 }
