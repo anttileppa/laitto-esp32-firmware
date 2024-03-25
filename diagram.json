@@ -2,8 +2,8 @@
   "version": 1,
   "author": "Antti Leppä",
   "editor": "wokwi",
-  "parts": [ 
-    { "type": "wokwi-esp32-devkit-v1", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+  "parts": [
+    { "type": "board-esp32-s3-devkitc-1", "id": "esp", "top": 0, "left": 0, "attrs": {} },
     { "type": "board-ds18b20", "id": "temp1", "top": 42.95, "left": -125.95, "attrs": {} },
     { "type": "wokwi-relay-module", "id": "ssr1", "top": 0, "left": 250, "attrs": {} }
   ],
@@ -11,11 +11,11 @@
     [ "esp:TX0", "$serialMonitor:RX", "", [] ],
     [ "esp:RX0", "$serialMonitor:TX", "", [] ],
     [ "esp:GND.2", "temp1:GND", "black", [] ],
-    [ "esp:D13", "temp1:DQ", "green", [] ],
-    [ "esp:3V3", "temp1:VCC", "red", [] ],    
+    [ "esp:13", "temp1:DQ", "green", [] ],
+    [ "esp:3V3.1", "temp1:VCC", "red", [] ],    
     [ "esp:GND.1", "ssr1:GND", "black", [] ],    
-    [ "esp:D4", "ssr1:IN", "green", [] ],
-    [ "esp:3V3", "ssr1:VCC", "red", [] ]
+    [ "esp:4", "ssr1:IN", "green", [] ],
+    [ "esp:3V3.2", "ssr1:VCC", "red", [] ]
   ],
   "dependencies": {}
 }

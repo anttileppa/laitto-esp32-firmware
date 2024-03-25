@@ -34,6 +34,8 @@ static bool relayOn[16] = {
 #define MQTT_CONNECT_TIMEOUT 10000
 #define TEMPERATURE_SENSOR_PIN 13
 #define OTA_CHECK_INTERVAL_MS 60000
+#define ONLINE_MESSAGE_INTERVAL_MS 10000
+#define TEMPERATURE_PUBLISH_INTERVAL_MS 5000
 
 // Temperature sensors
 OneWire oneWire(TEMPERATURE_SENSOR_PIN);
@@ -56,6 +58,8 @@ unsigned long ssrState = 0;
 unsigned long ssrLastPulse = 0;
 unsigned long ssrInterval = 0;
 bool ssrActive = false;
+unsigned long lastOnlineMessage = 0;
+unsigned long lastTemperaturePublish = 0;
 
 /**
  * Connect ESP to wifi
@@ -141,8 +145,12 @@ void updateSsrState(int newState) {
  * @param payload payload of the message
  */
 void messageReceived(String &topic, String &payload) {
+  Serial.println("Received message");
+
   if (topic.startsWith("devices/") && topic.endsWith("/changeStatus")) {
     // It's a device status change message
+
+    Serial.println("Received message: " + topic + " - " + payload);
     
     String deviceId = topic.substring(topic.indexOf('/') + 1, topic.lastIndexOf('/')); 
     int status = parseChangeStatusMessageStatus(payload);
@@ -205,6 +213,25 @@ String getRelayId(int index) {
 }
 
 /**
+ * Returns SSR id. Id is in format <device_id>-ssr (e.g. 1234567890-ssr).
+ * 
+ * @return SSR id
+ */
+String getSsrId() {
+  return getShortDeviceId() + "-ssr";
+}
+
+/**
+ * Subscribe to MQTT topic
+ * 
+ * @param topic topic to subscribe to
+ */
+void mqttSubscribe(const String &topic) {
+  Serial.println("MQTT subscribing to " + topic);
+  client.subscribe(topic);
+};
+
+/**
  * Connect to MQTT 
 */
 void connectToMQTT() {
@@ -232,8 +259,10 @@ void connectToMQTT() {
   }
 
   for (int i = 0; i < 16; i++) {
-    client.subscribe("devices/" + getRelayId(i) + "/changeStatus");
+    mqttSubscribe("devices/" + getRelayId(i) + "/changeStatus");
   };
+
+  mqttSubscribe("devices/" + getSsrId() + "/changeStatus");
 
   client.onMessage(messageReceived);
   publishOnlineMqttMessage();
@@ -263,7 +292,7 @@ std::string arrayToHexString(uint8_t* arr, size_t size) {
  * 
  * @param deviceAddress device address for the temperature sensor
  */
-void sendTemperatureData(DeviceAddress deviceAddress) {
+void publishTemperatureChange(DeviceAddress deviceAddress) {
   float tempC = sensors.getTempC(deviceAddress);
   StaticJsonDocument<200> doc;
   doc["temperature"] = tempC;
@@ -277,6 +306,33 @@ void sendTemperatureData(DeviceAddress deviceAddress) {
   Serial.print(": ");
   Serial.println(jsonBuffer);
 };
+
+/**
+ * Publishes device online message
+ * 
+ * @param deviceId device id
+ * @param status status of the device
+ */
+void publishDeviceOnline(const String &deviceId, const int status) {
+  StaticJsonDocument<200> doc;
+  doc["status"] = status;
+  char jsonBuffer[512];
+  serializeJson(doc, jsonBuffer);
+  client.publish("devices/" + deviceId + "/online", jsonBuffer);
+}
+
+/**
+ * Publishes device onlines
+ */
+void publishDeviceOnlines() {
+  Serial.println("Publishing device onlines");
+  
+  for (int i = 0; i < 16; i++) {
+    publishDeviceOnline(getRelayId(i), relayOn[i]);
+  }
+
+  publishDeviceOnline(getSsrId(), ssrState);
+}
 
 /**
  * Initialize relays by setting pin mode to output 
@@ -324,6 +380,9 @@ void setup() {
   // Init MQTT
   connectToMQTT();
 
+  // Publish online message
+  publishDeviceOnlines();
+
   Serial.println("Setup done!");
   Serial.println("Version: " + getCurrentVersionName());
   Serial.println("Device id: " + deviceId);
@@ -343,11 +402,15 @@ void setSsrActive(bool active) {
  * Main loop
  */
 void loop() {
-  sensors.requestTemperatures();
+  if (millis() - lastTemperaturePublish > TEMPERATURE_PUBLISH_INTERVAL_MS) {
+    Serial.println("Requesting temperatures");
 
-  for (int temperatureSensorIndex = 0; temperatureSensorIndex < temperatureSensorCount; temperatureSensorIndex++) {
-    if (sensors.getAddress(temperatureDeviceAddress, temperatureSensorIndex)) {
-        sendTemperatureData(temperatureDeviceAddress);
+    lastTemperaturePublish = millis();
+    sensors.requestTemperatures();
+    for (int temperatureSensorIndex = 0; temperatureSensorIndex < temperatureSensorCount; temperatureSensorIndex++) {
+      if (sensors.getAddress(temperatureDeviceAddress, temperatureSensorIndex)) {
+          publishTemperatureChange(temperatureDeviceAddress);
+      }
     }
   }
 
@@ -363,7 +426,7 @@ void loop() {
     esp_restart();
   }
 
-  if (millis() - lastOtaCheck > OTA_CHECK_INTERVAL_MS) {
+  if (ssrState > 0 && millis() - lastOtaCheck > OTA_CHECK_INTERVAL_MS) {
     lastOtaCheck = millis();
     checkFirmwareUpdates();
   }
@@ -379,4 +442,8 @@ void loop() {
     }
   }
 
+  if (millis() - lastOnlineMessage > ONLINE_MESSAGE_INTERVAL_MS) {
+    lastOnlineMessage = millis();
+    publishDeviceOnlines();
+  }
 }
