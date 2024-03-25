@@ -109,10 +109,29 @@ int parseChangeStatusMessageStatus(String &payload) {
   
   if (error) {
     Serial.println("Failed to parse JSON");
-    return;
+    return -1;
   }
 
   return doc["status"]; 
+}
+
+/**
+ * Calculate SSR interval based on SSR state
+ * 
+ * @return SSR interval in milliseconds
+ */
+int calculateSsrInterval() {
+  return 500 * (100 - ssrState) / 100;
+}
+
+/**
+ * Update SSR state and calculate new interval
+ * 
+ * @param newState new state of the SSR
+ */
+void updateSsrState(int newState) {
+  ssrState = newState;
+  ssrInterval = calculateSsrInterval();
 }
 
 /**
@@ -127,6 +146,10 @@ void messageReceived(String &topic, String &payload) {
     
     String deviceId = topic.substring(topic.indexOf('/') + 1, topic.lastIndexOf('/')); 
     int status = parseChangeStatusMessageStatus(payload);
+    if (status == -1) {
+      return;
+    }
+    
     int relayIndex = deviceId.indexOf("-relay-");
     
     if (relayIndex > -1) {
@@ -134,15 +157,10 @@ void messageReceived(String &topic, String &payload) {
 
       String relayIndexString = deviceId.substring(relayIndex + 7);
       int relayIndex = relayIndexString.toInt();
-      if (status > -1) {
-        setRelayActive(relayIndex, status > 0);
-      }
+      setRelayActive(relayIndex, status > 0);
     } else if (deviceId.endsWith("-ssr")) {
       // ... for SSR
-
-      if (status > -1) {
-        updateSsrState(status);
-      }
+      updateSsrState(status);
     }
   }
 }
@@ -309,25 +327,6 @@ void setup() {
   Serial.println("Setup done!");
   Serial.println("Version: " + getCurrentVersionName());
   Serial.println("Device id: " + deviceId);
-}
-
-/**
- * Calculate SSR interval based on SSR state
- * 
- * @return SSR interval in milliseconds
- */
-int calculateSsrInterval() {
-  return 500 * (100 - ssrState) / 100;
-}
-
-/**
- * Update SSR state and calculate new interval
- * 
- * @param newState new state of the SSR
- */
-void updateSsrState(int newState) {
-  ssrState = newState;
-  ssrInterval = calculateSsrInterval();
 }
 
 /**
