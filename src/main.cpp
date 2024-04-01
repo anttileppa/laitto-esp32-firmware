@@ -36,6 +36,8 @@ static bool relayOn[16] = {
 #define OTA_CHECK_INTERVAL_MS 60000
 #define ONLINE_MESSAGE_INTERVAL_MS 10000
 #define TEMPERATURE_PUBLISH_INTERVAL_MS 5000
+#define LOG_TO_MQTT true
+#define SSR_RETENTION_TIME_MS 10000
 
 // Temperature sensors
 OneWire oneWire(TEMPERATURE_SENSOR_PIN);
@@ -55,11 +57,24 @@ unsigned long lastMqttConnection = 0;
 String deviceId = "";
 unsigned long lastOtaCheck = 0;
 unsigned long ssrState = 0;
-unsigned long ssrLastPulse = 0;
-unsigned long ssrInterval = 0;
 bool ssrActive = false;
+unsigned long ssrOffTime = 0;
+unsigned long ssrStateChanged = 0;
 unsigned long lastOnlineMessage = 0;
 unsigned long lastTemperaturePublish = 0;
+
+/**
+ * Write log message
+ * 
+ * @param message message to write
+ */
+void writeLog(const String &message) {
+  if (LOG_TO_MQTT) {
+    client.publish("devices/" + deviceId + "/log", message);
+  } else {
+    Serial.println(message);
+  }
+}
 
 /**
  * Connect ESP to wifi
@@ -86,16 +101,16 @@ void connectWifi() {
  */
 void setRelayActive(int relayIndex, bool active, bool force = false) {
   if (!force && relayOn[relayIndex] == active) {
-    Serial.println("Relay " + String(relayIndex) + " is already " + String(active ? "active" : "deactive"));
+    writeLog("Relay " + String(relayIndex) + " is already " + String(active ? "active" : "deactive"));
     return;
   }
   
   int pin = relayToPinMapping[relayIndex];
   if (pin == 0) {
-    Serial.println("Relay index " + String(relayIndex) + " is not mapped to any pin");
+    writeLog("Relay index " + String(relayIndex) + " is not mapped to any pin");
     return;
   } else {
-    Serial.println("Setting relay " + String(relayIndex) + " to " + String(active ? "active" : "deactive"));
+    writeLog("Setting relay " + String(relayIndex) + " to " + String(active ? "active" : "deactive"));
     digitalWrite(pin, active ? LOW : HIGH);
     relayOn[relayIndex] = active;
   }
@@ -112,7 +127,7 @@ int parseChangeStatusMessageStatus(String &payload) {
   DeserializationError error = deserializeJson(doc, payload);
   
   if (error) {
-    Serial.println("Failed to parse JSON");
+    writeLog("Failed to parse JSON");
     return -1;
   }
 
@@ -120,12 +135,13 @@ int parseChangeStatusMessageStatus(String &payload) {
 }
 
 /**
- * Calculate SSR interval based on SSR state
+ * Calculate SSR off time based on SSR state. This is used to calculate how long the SSR should be off
  * 
- * @return SSR interval in milliseconds
- */
-int calculateSsrInterval() {
-  return 500 * (100 - ssrState) / 100;
+ * Example: if SSR_RETENTION_TIME_MS is 10000 and SSR state is 50, the SSR should be off for 5000 ms
+ * Example: if SSR_RETENTION_TIME_MS is 10000 and SSR state is 90, the SSR should be off for 1000 ms
+*/
+int calculateSsrOffTime() {
+  return SSR_RETENTION_TIME_MS * (100 - ssrState) / 100;
 }
 
 /**
@@ -135,7 +151,8 @@ int calculateSsrInterval() {
  */
 void updateSsrState(int newState) {
   ssrState = newState;
-  ssrInterval = calculateSsrInterval();
+  ssrOffTime = calculateSsrOffTime();
+  writeLog("SSR state: " + String(ssrState) + ", ssr off time: " + String(ssrOffTime));
 }
 
 /**
@@ -145,12 +162,12 @@ void updateSsrState(int newState) {
  * @param payload payload of the message
  */
 void messageReceived(String &topic, String &payload) {
-  Serial.println("Received message");
+  writeLog("Received message");
 
   if (topic.startsWith("devices/") && topic.endsWith("/changeStatus")) {
     // It's a device status change message
 
-    Serial.println("Received message: " + topic + " - " + payload);
+    writeLog("Received message: " + topic + " - " + payload);
     
     String deviceId = topic.substring(topic.indexOf('/') + 1, topic.lastIndexOf('/')); 
     int status = parseChangeStatusMessageStatus(payload);
@@ -227,7 +244,7 @@ String getSsrId() {
  * @param topic topic to subscribe to
  */
 void mqttSubscribe(const String &topic) {
-  Serial.println("MQTT subscribing to " + topic);
+  writeLog("MQTT subscribing to " + topic);
   client.subscribe(topic);
 };
 
@@ -267,7 +284,7 @@ void connectToMQTT() {
   client.onMessage(messageReceived);
   publishOnlineMqttMessage();
 
-  Serial.println("MQTT connected!");
+  writeLog("MQTT connected!");
 }
 
 /**
@@ -301,10 +318,6 @@ void publishTemperatureChange(DeviceAddress deviceAddress) {
 
   std::string channel = "devices/" + arrayToHexString(deviceAddress, 8) + "/status/temperature";
   client.publish(channel.c_str(), jsonBuffer);
-
-  Serial.print(channel.c_str());
-  Serial.print(": ");
-  Serial.println(jsonBuffer);
 };
 
 /**
@@ -325,7 +338,7 @@ void publishDeviceOnline(const String &deviceId, const int status) {
  * Publishes device onlines
  */
 void publishDeviceOnlines() {
-  Serial.println("Publishing device onlines");
+  writeLog("Publishing device onlines");
   
   for (int i = 0; i < 16; i++) {
     publishDeviceOnline(getRelayId(i), relayOn[i]);
@@ -395,6 +408,8 @@ void setup() {
  */
 void setSsrActive(bool active) {
   ssrActive = active;
+  ssrStateChanged = millis();
+  writeLog("Setting SSR to " + String(ssrActive ? "active" : "inactive"));
   digitalWrite(SSR_PIN, ssrActive ? HIGH : LOW);
 }
 
@@ -435,10 +450,11 @@ void loop() {
     setSsrActive(false);
   } else if (ssrState == 100 && !ssrActive) {
     setSsrActive(true);
-  } else {
-    if (millis() - ssrLastPulse > ssrInterval) {
-      ssrLastPulse = millis();
-      setSsrActive(!ssrActive);
+  } else if (ssrState > 0 && ssrState < 100) {
+    if (ssrActive && (millis() - ssrStateChanged) > (SSR_RETENTION_TIME_MS - ssrOffTime)) {
+      setSsrActive(false);
+    } else if (!ssrActive && millis() - ssrStateChanged > ssrOffTime) {
+      setSsrActive(true);
     }
   }
 
