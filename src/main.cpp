@@ -10,13 +10,22 @@
 #include "secrets.h"
 
 /**
+ * Struct for MQTT server
+ */
+struct MqttServer {
+  char host[100];
+  char protocol[10];
+  uint16_t port;
+};
+
+/**
  * Pin mapping for relays
  */
 static const int relayToPinMapping[16] = {
   00, 00, 00, 00, // Relay 1 to 4
   00, 00, 00, 00, // Relay 5 to 8
   00, 00, 00, 00, // Relay 9 to 12
-  00, 00, 10, 11  // Relay 13 to 16
+   9, 10, 11, 12  // Relay 13 to 16
 };
 
 /**
@@ -51,6 +60,7 @@ bool ethConnected = false;
 MQTTClient client = MQTTClient(4096);
 
 // Variables
+static int8_t mqttServerIndex = MQTT_URL_COUNT - 1;
 int temperatureSensorCount = 0;
 DeviceAddress temperatureDeviceAddress;
 unsigned long lastMqttConnection = 0;
@@ -69,10 +79,10 @@ unsigned long lastTemperaturePublish = 0;
  * @param message message to write
  */
 void writeLog(const String &message) {
+  Serial.println(message);
+
   if (LOG_TO_MQTT) {
     client.publish("devices/" + deviceId + "/log", message);
-  } else {
-    Serial.println(message);
   }
 }
 
@@ -239,6 +249,42 @@ String getSsrId() {
 }
 
 /**
+ * Parses mqtt server url
+ * 
+ * @param url mqtt server url
+ * @param server mqtt server struct
+ */
+void parseMqttServerUrl(const char* url, MqttServer* server) {
+  sscanf(url, "%[^:]://%[^:]:%hu", server->protocol, server->host, &server->port);
+}
+
+/**
+ * Parses mqtt server urls
+ * 
+ * @param urls mqtt server urls
+ */
+
+MqttServer getMqttServer() {
+  mqttServerIndex = (mqttServerIndex + 1) % MQTT_URL_COUNT;
+  char mqttUrls[] = MQTT_URLS;
+  char* url = strtok(mqttUrls, ",");
+
+  uint8_t i = 0;
+  while (url != NULL && i < MQTT_URL_COUNT) {
+    if (i == mqttServerIndex) {
+      MqttServer server;
+      parseMqttServerUrl(url, &server);
+      return server;
+    } else {
+      url = strtok(NULL, ",");
+      i++;
+    }
+  }
+
+  throw "No MQTT servers found";
+};
+
+/**
  * Subscribe to MQTT topic
  * 
  * @param topic topic to subscribe to
@@ -252,16 +298,24 @@ void mqttSubscribe(const String &topic) {
  * Connect to MQTT 
 */
 void connectToMQTT() {
+  MqttServer mqttServer = getMqttServer();
+
   Serial.print("Setting MQTT settings (");
-  Serial.print("user: ");
+  Serial.print("Server index: ");
+  Serial.print(mqttServerIndex);
+  Serial.print(", user: ");
   Serial.print(MQTT_USER);
   Serial.print(", pass: ");
   Serial.print(MQTT_PASSWORD);
-  Serial.print(", server: ");
-  Serial.print(MQTT_SERVER);
+  Serial.print(", host: ");
+  Serial.print(mqttServer.host);
+  Serial.print(", port: ");
+  Serial.print(mqttServer.port);
+  Serial.print(", protocol: ");
+  Serial.print(mqttServer.protocol);
   Serial.println(")");
 
-  client.begin(MQTT_SERVER, MQTT_PORT, net);
+  client.begin(mqttServer.host, mqttServer.port, net);
 
   client.setOptions(10, true, 5000);
 
@@ -418,7 +472,7 @@ void setSsrActive(bool active) {
  */
 void loop() {
   if (millis() - lastTemperaturePublish > TEMPERATURE_PUBLISH_INTERVAL_MS) {
-    Serial.println("Requesting temperatures");
+    writeLog("Requesting temperatures. Sensor count: " + String(temperatureSensorCount));
 
     lastTemperaturePublish = millis();
     sensors.requestTemperatures();
